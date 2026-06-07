@@ -53,6 +53,11 @@ import router from "@/router/index.js";
 
 const canvasRef = ref(null);
 const camera = ref(null);
+
+// Babylon engine/scene are kept at script scope so non-render handlers
+// (e.g. exportToGLB) can access the populated scene built in onMounted.
+let engine = null;
+let scene = null;
 const emit = defineEmits(['cylinder-selected', 'export-complete', 'export-error']);
 const popup = reactive({
   visible: false,
@@ -119,8 +124,8 @@ function calculateCylinderVolume(radius, height) {
 onMounted(() => {
   if (!canvasRef.value) return;
 
-  const engine = new Engine(canvasRef.value, true);
-  const scene = new Scene(engine);
+  engine = new Engine(canvasRef.value, true);
+  scene = new Scene(engine);
   scene.clearColor = new Color3(0.7, 0.8, 0.9);
 
   // Camera setup
@@ -269,32 +274,15 @@ const logout = () => {
 }
 
 const exportToGLB = async() => {
-  if (!canvasRef.value) {
-    console.error('Canvas not available for export');
-    return;
-  };
-
-  const engine = new Engine(canvasRef.value, true);
-  const scene = new Scene(engine);
-
   if (!scene) {
     console.error('Scene not available for export');
     return;
   }
 
   try {
-    // Create a new scene for export to avoid interfering with the main scene
-    const exportScene = new Scene(engine);
-
-    // Copy all meshes to export scene
-    scene.meshes.forEach(mesh => {
-      if (mesh.name !== 'camera') {
-        mesh.clone(mesh.name + '_export', null, exportScene);
-      }
-    });
-
-    // Export to GLTF
-    const gltfData = await GLTF2Export.GLTFAsync(exportScene, 'factory-floor-plan');
+    // Export the live scene directly. GLTF2Export reads the meshes without
+    // mutating the scene, so there's no need to clone into a throwaway scene.
+    const gltfData = await GLTF2Export.GLTFAsync(scene, 'factory-floor-plan');
 
     // Create download link
     const blob = new Blob([gltfData.glTFFiles['factory-floor-plan.gltf']], { type: 'application/json' });
@@ -321,9 +309,6 @@ const exportToGLB = async() => {
       document.body.removeChild(binLink);
       URL.revokeObjectURL(binUrl);
     }
-
-    // Clean up export scene
-    exportScene.dispose();
 
     emit('export-complete', 'GLTF export completed successfully!');
 
